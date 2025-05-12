@@ -79,6 +79,8 @@ export default function PropertyPage() {
   const mapRef = useRef<HTMLDivElement>(null)
   const scriptRef = useRef<HTMLScriptElement | null>(null)
   const [mapLoaded, setMapLoaded] = useState(false)
+  // 맵 인스턴스를 useRef로 관리하여 리렌더링 방지
+  const mapInstanceRef = useRef<any>(null)
 
   // 컴포넌트가 마운트될 때 params.id 사용
   useEffect(() => {
@@ -228,6 +230,11 @@ export default function PropertyPage() {
 
   // 카카오맵 초기화 (서울역 주변 지도)
   useEffect(() => {
+    // 이미 맵이 로드되었다면 초기화 중단
+    if (mapLoaded) return;
+
+    let isComponentMounted = true;
+
     const loadKakaoMap = () => {
       // 이미 스크립트가 있는 경우 중복 로드 방지
       if (document.getElementById('kakao-map-script')) {
@@ -237,6 +244,11 @@ export default function PropertyPage() {
         } else {
           // kakao 객체가 로드될 때까지 기다림
           const checkKakaoInterval = setInterval(() => {
+            if (!isComponentMounted) {
+              clearInterval(checkKakaoInterval);
+              return;
+            }
+            
             if (window.kakao && window.kakao.maps) {
               clearInterval(checkKakaoInterval);
               initializeMap();
@@ -253,9 +265,14 @@ export default function PropertyPage() {
       script.async = true;
       
       script.onload = () => {
+        // 컴포넌트가 언마운트되었으면 초기화 중단
+        if (!isComponentMounted) return;
+        
         // 스크립트 로드 후 kakao.maps 초기화
         window.kakao.maps.load(() => {
-          initializeMap();
+          if (isComponentMounted) {
+            initializeMap();
+          }
         });
       };
       
@@ -266,7 +283,10 @@ export default function PropertyPage() {
 
     // 지도 초기화 함수 (kakao.maps가 로드된 후 호출됨)
     const initializeMap = () => {
-      if (!mapRef.current || !window.kakao || !window.kakao.maps) return;
+      if (!mapRef.current || !window.kakao || !window.kakao.maps || !isComponentMounted) return;
+      
+      // mapLoaded가 이미 true이면 초기화 중지 (중복 초기화 방지)
+      if (mapLoaded && mapInstanceRef.current) return;
       
       try {
         // 서울역 좌표 (중심점)
@@ -278,19 +298,22 @@ export default function PropertyPage() {
           level: 3
         }
         
-        const kakaoMap = new window.kakao.maps.Map(mapRef.current, mapOptions)
+        // 이미 맵 인스턴스가 있으면 재사용
+        if (!mapInstanceRef.current) {
+          mapInstanceRef.current = new window.kakao.maps.Map(mapRef.current, mapOptions);
+        }
         
         // 서울역 마커 추가
         const marker = new window.kakao.maps.Marker({
           position: seoulStationPosition,
-          map: kakaoMap
-        })
+          map: mapInstanceRef.current
+        });
         
         // 인포윈도우 생성
         const infowindow = new window.kakao.maps.InfoWindow({
           content: '<div style="padding:5px;font-size:12px;text-align:center;">서울역</div>'
-        })
-        infowindow.open(kakaoMap, marker)
+        });
+        infowindow.open(mapInstanceRef.current, marker);
         
         // 주변 교통 및 편의 시설 마커 추가
         const placeMarkers = [
@@ -309,47 +332,52 @@ export default function PropertyPage() {
             title: '식당',
             content: '식당 (도보 5분)'
           }
-        ]
+        ];
         
         placeMarkers.forEach(place => {
           // 주변 시설 마커
           const placeMarker = new window.kakao.maps.Marker({
             position: place.position,
-            map: kakaoMap
-          })
+            map: mapInstanceRef.current
+          });
           
           // 마커에 마우스오버 이벤트 등록
           const placeInfowindow = new window.kakao.maps.InfoWindow({
             content: `<div style="padding:5px;font-size:12px;text-align:center;">${place.content}</div>`
-          })
+          });
           
           // 마우스 오버시 인포윈도우 표시
           window.kakao.maps.event.addListener(placeMarker, 'mouseover', function() {
-            placeInfowindow.open(kakaoMap, placeMarker)
-          })
+            placeInfowindow.open(mapInstanceRef.current, placeMarker);
+          });
           
           // 마우스 아웃시 인포윈도우 닫기
           window.kakao.maps.event.addListener(placeMarker, 'mouseout', function() {
-            placeInfowindow.close()
-          })
-        })
+            placeInfowindow.close();
+          });
+        });
         
-        setMapLoaded(true)
+        // 맵 로드 완료 상태 설정 (isComponentMounted 체크로 불필요한 상태 업데이트 방지)
+        if (!mapLoaded && isComponentMounted) {
+          setMapLoaded(true);
+        }
       } catch (error) {
         console.error('카카오맵 초기화 오류:', error);
       }
     };
 
+    // 맵 로드 시작
     loadKakaoMap();
 
     // 클린업 함수
     return () => {
-      if (scriptRef.current) {
+      isComponentMounted = false;
+      if (scriptRef.current && document.head.contains(scriptRef.current)) {
         document.head.removeChild(scriptRef.current);
         scriptRef.current = null;
       }
     };
-  }, []);
+  }, []); // 의존성 배열을 비워서 마운트/언마운트 시에만 실행
 
   return (
     <main className="min-h-screen bg-white">

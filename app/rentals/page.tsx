@@ -28,6 +28,8 @@ export default function RentalsPage() {
   const [map, setMap] = useState<any>(null)
   const mapRef = useRef<HTMLDivElement>(null)
   const scriptRef = useRef<HTMLScriptElement | null>(null)
+  const mapInstanceRef = useRef<any>(null)
+  const [mapInitialized, setMapInitialized] = useState(false)
 
   const { ref: loadMoreRef, inView } = useInView()
 
@@ -42,129 +44,252 @@ export default function RentalsPage() {
 
   // 카카오맵 스크립트 로드 및 초기화
   useEffect(() => {
+    if (!mapVisible) return;
+    if (mapInitialized && mapInstanceRef.current) {
+      // 이미 초기화된 맵이 있으면 중복 초기화 방지
+      return;
+    }
+
+    let isComponentMounted = true;
+
     const loadKakaoMap = () => {
       // 이미 스크립트가 있는 경우 중복 로드 방지
       if (document.getElementById('kakao-map-script')) {
-        initializeMap()
-        return
+        // 스크립트가 이미 존재하더라도 kakao 객체가 완전히 로드되었는지 확인
+        if (window.kakao && window.kakao.maps) {
+          initializeMap();
+        } else {
+          // kakao 객체가 로드될 때까지 기다림
+          const checkKakaoInterval = setInterval(() => {
+            if (!isComponentMounted) {
+              clearInterval(checkKakaoInterval);
+              return;
+            }
+            if (window.kakao && window.kakao.maps) {
+              clearInterval(checkKakaoInterval);
+              initializeMap();
+            }
+          }, 100);
+        }
+        return;
       }
 
       // 스크립트 생성
-      const script = document.createElement('script')
-      script.id = 'kakao-map-script'
-      script.src = `//dapi.kakao.com/v2/maps/sdk.js?appkey=${process.env.NEXT_PUBLIC_KAKAO_MAP_API_KEY}&libraries=services`
-      script.async = true
-      script.onload = initializeMap
+      const script = document.createElement('script');
+      script.id = 'kakao-map-script';
+      script.src = `//dapi.kakao.com/v2/maps/sdk.js?appkey=${process.env.NEXT_PUBLIC_KAKAO_MAP_API_KEY}&libraries=services&autoload=false`;
+      script.async = true;
+      
+      script.onload = () => {
+        if (!isComponentMounted) return;
+        
+        // 스크립트 로드 후 kakao.maps 초기화
+        window.kakao.maps.load(() => {
+          if (isComponentMounted) {
+            initializeMap();
+          }
+        });
+      };
       
       // DOM에 추가
-      document.head.appendChild(script)
-      scriptRef.current = script
-    }
+      document.head.appendChild(script);
+      scriptRef.current = script;
+    };
 
     // 지도 초기화 함수
     const initializeMap = () => {
-      if (!mapRef.current || !mapVisible) return
+      if (!mapRef.current || !mapVisible || !window.kakao || !window.kakao.maps || !isComponentMounted) return;
       
-      // 지도 객체 생성
-      const container = mapRef.current
-      const options = {
-        center: new window.kakao.maps.LatLng(37.5665, 126.9780), // 서울 중심 좌표
-        level: zoomLevel
-      }
-      
-      const kakaoMap = new window.kakao.maps.Map(container, options)
-      setMap(kakaoMap)
-      
-      // 지도 중심 위치 설정 (검색어 기반)
-      if (location) {
-        // 주소-좌표 변환 객체 생성
-        const geocoder = new window.kakao.maps.services.Geocoder()
+      try {
+        // 이미 맵이 초기화되었으면 재사용
+        if (mapInstanceRef.current) {
+          return;
+        }
         
-        geocoder.addressSearch(location, (result: any, status: any) => {
-          if (status === window.kakao.maps.services.Status.OK) {
-            const coords = new window.kakao.maps.LatLng(result[0].y, result[0].x)
-            kakaoMap.setCenter(coords)
+        // 지도 객체 생성
+        const container = mapRef.current;
+        const options = {
+          center: new window.kakao.maps.LatLng(37.5665, 126.9780), // 서울 중심 좌표
+          level: zoomLevel
+        };
+        
+        const kakaoMap = new window.kakao.maps.Map(container, options);
+        mapInstanceRef.current = kakaoMap;
+        
+        if (isComponentMounted) {
+          setMap(kakaoMap);
+          setMapInitialized(true);
+        }
+        
+        // 지도 중심 위치 설정 (검색어 기반)
+        if (location) {
+          // 주소-좌표 변환 객체 생성
+          const geocoder = new window.kakao.maps.services.Geocoder();
+          
+          geocoder.addressSearch(location, (result: any, status: any) => {
+            if (!isComponentMounted) return;
             
-            // 마커 표시
-            const marker = new window.kakao.maps.Marker({
-              map: kakaoMap,
-              position: coords
-            })
-            
-            // 인포윈도우
-            const infowindow = new window.kakao.maps.InfoWindow({
-              content: `<div style="width:150px;text-align:center;padding:6px 0;">${location}</div>`
-            })
-            infowindow.open(kakaoMap, marker)
-          } else {
-            // 주소 검색 실패 시 기본 위치 설정
-            let newCenter
-            
-            if (location.includes("이태원")) {
-              newCenter = new window.kakao.maps.LatLng(37.5340, 126.9940)
-            } else if (location.includes("강남")) {
-              newCenter = new window.kakao.maps.LatLng(37.4980, 127.0280)
-            } else if (location.includes("홍대")) {
-              newCenter = new window.kakao.maps.LatLng(37.5570, 126.9240)
+            if (status === window.kakao.maps.services.Status.OK) {
+              const coords = new window.kakao.maps.LatLng(result[0].y, result[0].x);
+              kakaoMap.setCenter(coords);
+              
+              // 마커 표시
+              const marker = new window.kakao.maps.Marker({
+                map: kakaoMap,
+                position: coords
+              });
+              
+              // 인포윈도우
+              const infowindow = new window.kakao.maps.InfoWindow({
+                content: `<div style="width:150px;text-align:center;padding:6px 0;">${location}</div>`
+              });
+              infowindow.open(kakaoMap, marker);
             } else {
-              newCenter = new window.kakao.maps.LatLng(37.5665, 126.9780)
+              // 주소 검색 실패 시 기본 위치 설정
+              let newCenter;
+              
+              if (location.includes("이태원")) {
+                newCenter = new window.kakao.maps.LatLng(37.5340, 126.9940);
+              } else if (location.includes("강남")) {
+                newCenter = new window.kakao.maps.LatLng(37.4980, 127.0280);
+              } else if (location.includes("홍대")) {
+                newCenter = new window.kakao.maps.LatLng(37.5570, 126.9240);
+              } else {
+                newCenter = new window.kakao.maps.LatLng(37.5665, 126.9780);
+              }
+              
+              kakaoMap.setCenter(newCenter);
             }
-            
-            kakaoMap.setCenter(newCenter)
-          }
-        })
+          });
+        }
+        
+        // 필터링된 속성 기반으로 마커 추가
+        if (isComponentMounted) {
+          addPropertyMarkers(kakaoMap);
+        }
+      } catch (error) {
+        console.error('카카오맵 초기화 오류:', error);
       }
-      
-      // 필터링된 속성 기반으로 마커 추가
-      addPropertyMarkers(kakaoMap)
-    }
+    };
 
     // 속성 마커 추가 
     const addPropertyMarkers = (kakaoMap: any) => {
-      if (!filteredProperties.length) return
+      if (!filteredProperties.length || !window.kakao || !window.kakao.maps || !isComponentMounted) return;
+      
+      // 기존 오버레이 모두 제거 (중복 방지)
+      kakaoMap.removeOverlayMapTypeId(window.kakao.maps.MapTypeId.OVERLAY);
       
       filteredProperties.forEach(property => {
         // 속성에 따라 위치 지정
-        let position
+        let position;
         
-        if (property.subtitle.includes("이태원")) {
-          position = new window.kakao.maps.LatLng(37.5340, 126.9940) // 이태원 대략적 위치
-        } else if (property.subtitle.includes("강남")) {
-          position = new window.kakao.maps.LatLng(37.4980, 127.0280) // 강남 대략적 위치
-        } else if (property.subtitle.includes("홍대")) {
-          position = new window.kakao.maps.LatLng(37.5570, 126.9240) // 홍대 대략적 위치
-        } else {
-          // 기본 위치 (서울 중심부에서 약간 랜덤하게)
-          const lat = 37.5665 + (Math.random() - 0.5) * 0.02
-          const lng = 126.9780 + (Math.random() - 0.5) * 0.02
-          position = new window.kakao.maps.LatLng(lat, lng)
+        try {
+          if (property.subtitle.includes("이태원")) {
+            position = new window.kakao.maps.LatLng(37.5340, 126.9940); // 이태원 대략적 위치
+          } else if (property.subtitle.includes("강남")) {
+            position = new window.kakao.maps.LatLng(37.4980, 127.0280); // 강남 대략적 위치
+          } else if (property.subtitle.includes("홍대")) {
+            position = new window.kakao.maps.LatLng(37.5570, 126.9240); // 홍대 대략적 위치
+          } else {
+            // 기본 위치 (서울 중심부에서 약간 랜덤하게)
+            const lat = 37.5665 + (Math.random() - 0.5) * 0.02;
+            const lng = 126.9780 + (Math.random() - 0.5) * 0.02;
+            position = new window.kakao.maps.LatLng(lat, lng);
+          }
+
+          // 커스텀 오버레이 생성
+          const content = `<div class="bg-black text-white px-2 py-1 rounded-full text-sm shadow-lg whitespace-nowrap">${property.price.toLocaleString()}원</div>`;
+          
+          const customOverlay = new window.kakao.maps.CustomOverlay({
+            position: position,
+            content: content,
+            yAnchor: 1
+          });
+          
+          customOverlay.setMap(kakaoMap);
+        } catch (error) {
+          console.error('마커 생성 오류:', error);
         }
+      });
+    };
 
-        // 커스텀 오버레이 생성
-        const content = `<div class="bg-black text-white px-2 py-1 rounded-full text-sm shadow-lg whitespace-nowrap">${property.price.toLocaleString()}원</div>`
-        
-        const customOverlay = new window.kakao.maps.CustomOverlay({
-          position: position,
-          content: content,
-          yAnchor: 1
-        })
-        
-        customOverlay.setMap(kakaoMap)
-      })
-    }
-
-    if (mapVisible) {
-      loadKakaoMap()
-    }
+    loadKakaoMap();
 
     // 클린업 함수
     return () => {
-      if (scriptRef.current && !mapVisible) {
-        document.head.removeChild(scriptRef.current)
-        scriptRef.current = null
+      isComponentMounted = false;
+      if (scriptRef.current && document.head.contains(scriptRef.current)) {
+        document.head.removeChild(scriptRef.current);
+        scriptRef.current = null;
+      }
+    };
+  }, [mapVisible]);
+  
+  // 필터링된 속성이 변경될 때 마커만 업데이트 (지도 재생성 없이)
+  useEffect(() => {
+    if (mapVisible && mapInstanceRef.current && window.kakao && window.kakao.maps) {
+      try {
+        // 기존 오버레이 모두 제거
+        mapInstanceRef.current.removeOverlayMapTypeId(window.kakao.maps.MapTypeId.OVERLAY);
+        
+        // 필터링된 속성 기반으로 마커 추가
+        filteredProperties.forEach(property => {
+          // 속성에 따라 위치 지정
+          let position;
+          
+          if (property.subtitle.includes("이태원")) {
+            position = new window.kakao.maps.LatLng(37.5340, 126.9940); // 이태원 대략적 위치
+          } else if (property.subtitle.includes("강남")) {
+            position = new window.kakao.maps.LatLng(37.4980, 127.0280); // 강남 대략적 위치
+          } else if (property.subtitle.includes("홍대")) {
+            position = new window.kakao.maps.LatLng(37.5570, 126.9240); // 홍대 대략적 위치
+          } else {
+            // 기본 위치 (서울 중심부에서 약간 랜덤하게)
+            const lat = 37.5665 + (Math.random() - 0.5) * 0.02;
+            const lng = 126.9780 + (Math.random() - 0.5) * 0.02;
+            position = new window.kakao.maps.LatLng(lat, lng);
+          }
+
+          // 커스텀 오버레이 생성
+          const content = `<div class="bg-black text-white px-2 py-1 rounded-full text-sm shadow-lg whitespace-nowrap">${property.price.toLocaleString()}원</div>`;
+          
+          const customOverlay = new window.kakao.maps.CustomOverlay({
+            position: position,
+            content: content,
+            yAnchor: 1
+          });
+          
+          customOverlay.setMap(mapInstanceRef.current);
+        });
+      } catch (error) {
+        console.error('마커 업데이트 오류:', error);
       }
     }
-  }, [mapVisible, location, zoomLevel, filteredProperties])
+  }, [filteredProperties, mapVisible]);
+  
+  // 위치나 줌 레벨이 변경될 때 지도 설정 업데이트
+  useEffect(() => {
+    if (mapVisible && mapInstanceRef.current && window.kakao && window.kakao.maps) {
+      try {
+        // 줌 레벨 변경
+        mapInstanceRef.current.setLevel(zoomLevel);
+        
+        // 위치 검색이 변경된 경우에만 중심 위치 변경
+        if (location) {
+          const geocoder = new window.kakao.maps.services.Geocoder();
+          
+          geocoder.addressSearch(location, (result: any, status: any) => {
+            if (status === window.kakao.maps.services.Status.OK) {
+              const coords = new window.kakao.maps.LatLng(result[0].y, result[0].x);
+              mapInstanceRef.current.setCenter(coords);
+            }
+          });
+        }
+      } catch (error) {
+        console.error('지도 설정 업데이트 오류:', error);
+      }
+    }
+  }, [location, zoomLevel, mapVisible]);
 
   // 속성 더 불러오기
   useEffect(() => {
@@ -189,17 +314,17 @@ export default function RentalsPage() {
   }
 
   const handleZoomIn = () => {
-    if (map) {
-      const level = map.getLevel()
-      map.setLevel(level - 1)
+    if (mapInstanceRef.current) {
+      const level = mapInstanceRef.current.getLevel()
+      mapInstanceRef.current.setLevel(level - 1)
       setZoomLevel(level - 1)
     }
   }
 
   const handleZoomOut = () => {
-    if (map) {
-      const level = map.getLevel()
-      map.setLevel(level + 1)
+    if (mapInstanceRef.current) {
+      const level = mapInstanceRef.current.getLevel()
+      mapInstanceRef.current.setLevel(level + 1)
       setZoomLevel(level + 1)
     }
   }
