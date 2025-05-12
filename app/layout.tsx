@@ -10,7 +10,7 @@ const inter = Inter({ subsets: ["latin"] })
 export const metadata: Metadata = {
   title: "Korean Property Rental Platform",
   description: "Find your perfect rental property in Korea",
-    generator: 'v0.dev'
+  generator: 'ludgi.dev'
 }
 
 export default function RootLayout({

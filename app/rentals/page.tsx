@@ -8,6 +8,15 @@ import RentalFilters from "@/components/rental-filters"
 import PropertyCard from "@/components/property-card"
 import { cn } from "@/lib/utils"
 import { useInView } from "react-intersection-observer"
+import Head from "next/head"
+
+// 카카오맵 타입 정의
+declare global {
+  interface Window {
+    kakao: any
+    kakaoMapCallback: (() => void) | null
+  }
+}
 
 export default function RentalsPage() {
   const searchParams = useSearchParams()
@@ -15,11 +24,169 @@ export default function RentalsPage() {
 
   const [mapVisible, setMapVisible] = useState(!!location)
   const [properties, setProperties] = useState(rentalProperties.slice(0, 10))
-  const [zoomLevel, setZoomLevel] = useState(1)
+  const [zoomLevel, setZoomLevel] = useState(3)
   const [loading, setLoading] = useState(false)
+  const [mapLoaded, setMapLoaded] = useState(false)
+  const [map, setMap] = useState<any>(null)
   const mapRef = useRef<HTMLDivElement>(null)
 
   const { ref: loadMoreRef, inView } = useInView()
+
+  // Get filtered properties based on location
+  const filteredProperties = location
+    ? properties.filter(
+        (p) =>
+          p.subtitle.toLowerCase().includes(location.toLowerCase()) ||
+          p.title.toLowerCase().includes(location.toLowerCase()),
+      )
+    : properties
+
+  // 카카오맵 스크립트 로드
+  useEffect(() => {
+    // 이미 로드된 경우 스킵
+    if (window.kakao && window.kakao.maps) {
+      setMapLoaded(true)
+      return
+    }
+
+    // 카카오맵 콜백 함수 정의
+    window.kakaoMapCallback = () => {
+      console.log("Kakao map script loaded")
+      setMapLoaded(true)
+    }
+
+    // 스크립트 엘리먼트 생성 및 추가
+    const script = document.createElement("script")
+    script.src = `//dapi.kakao.com/v2/maps/sdk.js?appkey=${process.env.NEXT_PUBLIC_KAKAO_MAP_API_KEY}&libraries=services&autoload=false`
+    script.onload = () => {
+      window.kakao.maps.load(window.kakaoMapCallback)
+    }
+    document.head.appendChild(script)
+
+    return () => {
+      // 클린업
+      if (window.kakaoMapCallback) {
+        window.kakaoMapCallback = null
+      }
+    }
+  }, [])
+
+  // 지도 초기화
+  useEffect(() => {
+    if (!mapLoaded || !mapVisible || !mapRef.current || !window.kakao || !window.kakao.maps) {
+      return
+    }
+    
+    try {
+      // 지도 엘리먼트 크기 확인
+      const mapContainer = mapRef.current
+      console.log("Map container size:", mapContainer.offsetWidth, mapContainer.offsetHeight)
+      
+      if (mapContainer.offsetWidth === 0 || mapContainer.offsetHeight === 0) {
+        console.warn("Map container has zero size!")
+        // 컨테이너에 명시적 크기 설정
+        mapContainer.style.width = "500px"
+        mapContainer.style.height = "400px"
+      }
+      
+      const options = {
+        center: new window.kakao.maps.LatLng(37.5665, 126.9780), // 서울 중심 좌표
+        level: zoomLevel
+      }
+
+      // 지도 객체 생성
+      const kakaoMap = new window.kakao.maps.Map(mapContainer, options)
+      console.log("Kakao map created successfully")
+      setMap(kakaoMap)
+
+      // 지도 크기 재설정 (화면에 맞게 다시 렌더링)
+      window.kakao.maps.event.addListener(kakaoMap, 'tilesloaded', function() {
+        kakaoMap.relayout()
+      })
+
+      // 주소-좌표 변환 객체 생성
+      const geocoder = new window.kakao.maps.services.Geocoder()
+
+      // 지도 중심 위치 설정 (위치 검색어가 있는 경우)
+      if (location) {
+        // 주소로 좌표 검색
+        geocoder.addressSearch(location, function(result: any, status: any) {
+          // 정상적으로 검색이 완료됐으면
+          if (status === window.kakao.maps.services.Status.OK) {
+            const coords = new window.kakao.maps.LatLng(result[0].y, result[0].x)
+            
+            // 결과값으로 받은 위치를 지도의 중심으로 설정
+            kakaoMap.setCenter(coords)
+            
+            // 마커 표시
+            const marker = new window.kakao.maps.Marker({
+              map: kakaoMap,
+              position: coords
+            })
+            
+            // 인포윈도우로 장소에 대한 설명 표시
+            const infowindow = new window.kakao.maps.InfoWindow({
+              content: `<div style="width:150px;text-align:center;padding:6px 0;">${location}</div>`
+            })
+            infowindow.open(kakaoMap, marker)
+          } else {
+            // 주소 검색 실패 시 기본 위치 설정
+            let newCenter
+            
+            if (location.includes("이태원")) {
+              newCenter = new window.kakao.maps.LatLng(37.5340, 126.9940)
+            } else if (location.includes("강남")) {
+              newCenter = new window.kakao.maps.LatLng(37.4980, 127.0280)
+            } else if (location.includes("홍대")) {
+              newCenter = new window.kakao.maps.LatLng(37.5570, 126.9240)
+            } else {
+              newCenter = new window.kakao.maps.LatLng(37.5665, 126.9780)
+            }
+            
+            kakaoMap.setCenter(newCenter)
+          }
+        })
+      }
+
+      // 필터링된 속성 기반으로 마커 추가
+      if (filteredProperties.length > 0) {
+        filteredProperties.forEach(property => {
+          // 속성에 따라 위치 지정 (여기서는 임의 위치를 사용하고 있으며, 실제 구현에서는 위도/경도 데이터가 필요함)
+          let position
+          
+          if (property.subtitle.includes("이태원")) {
+            position = new window.kakao.maps.LatLng(37.5340, 126.9940) // 이태원 대략적 위치
+          } else if (property.subtitle.includes("강남")) {
+            position = new window.kakao.maps.LatLng(37.4980, 127.0280) // 강남 대략적 위치
+          } else if (property.subtitle.includes("홍대")) {
+            position = new window.kakao.maps.LatLng(37.5570, 126.9240) // 홍대 대략적 위치
+          } else {
+            // 기본 위치 (서울 중심부에서 약간 랜덤하게)
+            const lat = 37.5665 + (Math.random() - 0.5) * 0.02
+            const lng = 126.9780 + (Math.random() - 0.5) * 0.02
+            position = new window.kakao.maps.LatLng(lat, lng)
+          }
+
+          // 커스텀 오버레이 생성
+          const content = `<div class="bg-black text-white px-2 py-1 rounded-full text-sm shadow-lg whitespace-nowrap">${property.price.toLocaleString()}원</div>`
+          
+          const customOverlay = new window.kakao.maps.CustomOverlay({
+            position: position,
+            content: content,
+            yAnchor: 1
+          })
+          
+          customOverlay.setMap(kakaoMap)
+        })
+      }
+
+      // 지도 컨트롤 추가
+      const zoomControl = new window.kakao.maps.ZoomControl()
+      kakaoMap.addControl(zoomControl, window.kakao.maps.ControlPosition.RIGHT)
+    } catch (error) {
+      console.error("카카오맵 초기화 오류:", error)
+    }
+  }, [mapLoaded, mapVisible, zoomLevel, location, filteredProperties])
 
   // Load more properties when scrolling to the bottom
   useEffect(() => {
@@ -44,25 +211,26 @@ export default function RentalsPage() {
   }
 
   const handleZoomIn = () => {
-    setZoomLevel(Math.min(zoomLevel + 0.2, 2))
+    if (map) {
+      const level = map.getLevel()
+      map.setLevel(level - 1)
+      setZoomLevel(level - 1)
+    }
   }
 
   const handleZoomOut = () => {
-    setZoomLevel(Math.max(zoomLevel - 0.2, 1))
+    if (map) {
+      const level = map.getLevel()
+      map.setLevel(level + 1)
+      setZoomLevel(level + 1)
+    }
   }
 
   const toggleMap = () => {
     setMapVisible(!mapVisible)
   }
-
-  // Get filtered properties based on location
-  const filteredProperties = location
-    ? properties.filter(
-        (p) =>
-          p.subtitle.toLowerCase().includes(location.toLowerCase()) ||
-          p.title.toLowerCase().includes(location.toLowerCase()),
-      )
-    : properties
+  
+  console.log("process.env.NEXT_PUBLIC_KAKAO_MAP_API_KEY: ",process.env.NEXT_PUBLIC_KAKAO_MAP_API_KEY)
 
   return (
     <main className="min-h-screen bg-gray-50">
@@ -113,7 +281,7 @@ export default function RentalsPage() {
             </div>
           </div>
 
-          {/* Map section */}
+          {/* 카카오 맵 섹션 */}
           {mapVisible && (
             <div
               className="w-2/5 ml-4 h-[calc(100vh-220px)] sticky top-[180px] rounded-lg overflow-hidden border transition-all duration-500 ease-in-out transform translate-x-0"
@@ -124,41 +292,14 @@ export default function RentalsPage() {
             >
               <div className="relative w-full h-full">
                 <div
-                  className="absolute inset-0 transition-transform duration-300"
-                  style={{
-                    transform: `scale(${zoomLevel})`,
-                    transformOrigin: "center",
-                  }}
+                  id="map"
+                  className="absolute inset-0 bg-gray-100 w-full h-full"
+                  style={{ width: '100%', height: '100%' }}
                   ref={mapRef}
-                >
-                  <img
-                    src={location === "이태원" ? "/itaewon-map.png" : "/korea-map.png"}
-                    alt={`${location || "Korea"} Map`}
-                    className="w-full h-full object-cover"
-                  />
+                />
 
-                  {/* Map overlay for markers */}
-                  <div className="absolute inset-0">
-                    {/* No need for a separate location marker as we're using location-specific maps */}
-
-                    {/* Map price markers */}
-                    <div className="absolute top-[30%] right-[40%] bg-black text-white px-2 py-1 rounded-full text-sm shadow-lg">
-                      350,000원
-                    </div>
-                    <div className="absolute bottom-[40%] left-[35%] bg-black text-white px-2 py-1 rounded-full text-sm shadow-lg">
-                      290,000원 외 <span className="font-bold">24</span>개
-                    </div>
-                    <div className="absolute top-[60%] left-[30%] bg-black text-white px-2 py-1 rounded-full text-sm shadow-lg">
-                      190,000원
-                    </div>
-                    <div className="absolute bottom-[30%] right-[25%] bg-black text-white px-2 py-1 rounded-full text-sm shadow-lg">
-                      200,000원
-                    </div>
-                  </div>
-                </div>
-
-                {/* Map controls */}
-                <div className="absolute top-4 right-4 flex flex-col gap-2">
+                {/* 커스텀 맵 컨트롤 (카카오맵 기본 컨트롤 외에 추가 기능이 필요한 경우) */}
+                <div className="absolute top-4 right-4 flex flex-col gap-2 z-10">
                   <Button size="icon" variant="secondary" onClick={handleZoomIn}>
                     <ZoomIn className="h-4 w-4" />
                   </Button>

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import Image from "next/image"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
@@ -53,6 +53,7 @@ export default function PropertyPage({ params }: PropertyPageProps) {
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [showChatModal, setShowChatModal] = useState(false)
   const [showContactHostModal, setShowContactHostModal] = useState(false)
+  const [propertyId, setPropertyId] = useState<number>(0)
 
   // Form states
   const [firstName, setFirstName] = useState("")
@@ -67,9 +68,16 @@ export default function PropertyPage({ params }: PropertyPageProps) {
   const [agreeNews, setAgreeNews] = useState(false)
   const [cardNumber, setCardNumber] = useState("")
 
+  // 컴포넌트가 마운트될 때 params.id 사용
+  useEffect(() => {
+    if (params.id) {
+      setPropertyId(Number.parseInt(params.id))
+    }
+  }, [params.id])
+
   // In a real app, you would fetch the property data based on the ID
   const property = {
-    id: Number.parseInt(params.id),
+    id: propertyId,
     title: "[7mins to Seoul Station on foot] Joyenjoy Stay",
     description:
       "- Safe entrance with CCTV and IOT smart door lock\n- Hotel-quality bedding and 43-inch smart plana TV (Netflix/Disney+/YouTube, etc.)\n- Convenience stores, brunch cafes, and laundry facilities nearby...",
@@ -192,7 +200,7 @@ export default function PropertyPage({ params }: PropertyPageProps) {
 
   const handleUserInfoSubmit = () => {
     setShowUserInfoModal(false)
-    router.push(`/payment/${params.id}?roomId=${selectedRoomId}`)
+    router.push(`/payment/${propertyId}?roomId=${selectedRoomId}`)
   }
 
   const handlePayNow = () => {
