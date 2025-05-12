@@ -333,7 +333,6 @@ export default function RentalsPage() {
     setMapVisible(!mapVisible)
   }
   
-  console.log("process.env.NEXT_PUBLIC_KAKAO_MAP_API_KEY: ",process.env.NEXT_PUBLIC_KAKAO_MAP_API_KEY)
 
   return (
     <main className="min-h-screen bg-gray-50">
