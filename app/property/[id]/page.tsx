@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import Image from "next/image"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
@@ -38,6 +38,13 @@ interface PropertyPageProps {
   }
 }
 
+// 카카오맵 타입 정의
+declare global {
+  interface Window {
+    kakao: any
+  }
+}
+
 export default function PropertyPage({ params }: PropertyPageProps) {
   const router = useRouter()
   const [selectedStartDate, setSelectedStartDate] = useState<Date | undefined>(new Date())
@@ -67,6 +74,10 @@ export default function PropertyPage({ params }: PropertyPageProps) {
   const [agreeMarketing, setAgreeMarketing] = useState(false)
   const [agreeNews, setAgreeNews] = useState(false)
   const [cardNumber, setCardNumber] = useState("")
+
+  const mapRef = useRef<HTMLDivElement>(null)
+  const scriptRef = useRef<HTMLScriptElement | null>(null)
+  const [mapLoaded, setMapLoaded] = useState(false)
 
   // 컴포넌트가 마운트될 때 params.id 사용
   useEffect(() => {
@@ -212,6 +223,110 @@ export default function PropertyPage({ params }: PropertyPageProps) {
     // In a real app, you would redirect to a confirmation page
     alert("결제가 완료되었습니다!")
   }
+
+  // 카카오맵 초기화 (서울역 주변 지도)
+  useEffect(() => {
+    const loadKakaoMap = () => {
+      // 이미 스크립트가 있는 경우 중복 로드 방지
+      if (document.getElementById('kakao-map-script')) {
+        initializeMap()
+        return
+      }
+
+      // 스크립트 생성
+      const script = document.createElement('script')
+      script.id = 'kakao-map-script'
+      script.src = `//dapi.kakao.com/v2/maps/sdk.js?appkey=${process.env.NEXT_PUBLIC_KAKAO_MAP_API_KEY}&libraries=services`
+      script.async = true
+      script.onload = initializeMap
+      
+      // DOM에 추가
+      document.head.appendChild(script)
+      scriptRef.current = script
+    }
+
+    // 지도 초기화 함수
+    const initializeMap = () => {
+      if (!mapRef.current) return
+      
+      // 서울역 좌표 (중심점)
+      const seoulStationPosition = new window.kakao.maps.LatLng(37.5546, 126.9706)
+      
+      // 지도 객체 생성
+      const mapOptions = {
+        center: seoulStationPosition,
+        level: 3
+      }
+      
+      const kakaoMap = new window.kakao.maps.Map(mapRef.current, mapOptions)
+      
+      // 서울역 마커 추가
+      const marker = new window.kakao.maps.Marker({
+        position: seoulStationPosition,
+        map: kakaoMap
+      })
+      
+      // 인포윈도우 생성
+      const infowindow = new window.kakao.maps.InfoWindow({
+        content: '<div style="padding:5px;font-size:12px;text-align:center;">서울역</div>'
+      })
+      infowindow.open(kakaoMap, marker)
+      
+      // 주변 교통 및 편의 시설 마커 추가
+      const placeMarkers = [
+        {
+          position: new window.kakao.maps.LatLng(37.5555, 126.9721),
+          title: '편의점',
+          content: '편의점 (도보 5분)'
+        },
+        {
+          position: new window.kakao.maps.LatLng(37.5536, 126.9690),
+          title: '카페',
+          content: '카페 (도보 3분)'
+        },
+        {
+          position: new window.kakao.maps.LatLng(37.5562, 126.9718),
+          title: '식당',
+          content: '식당 (도보 5분)'
+        }
+      ]
+      
+      placeMarkers.forEach(place => {
+        // 주변 시설 마커
+        const placeMarker = new window.kakao.maps.Marker({
+          position: place.position,
+          map: kakaoMap
+        })
+        
+        // 마커에 마우스오버 이벤트 등록
+        const placeInfowindow = new window.kakao.maps.InfoWindow({
+          content: `<div style="padding:5px;font-size:12px;text-align:center;">${place.content}</div>`
+        })
+        
+        // 마우스 오버시 인포윈도우 표시
+        window.kakao.maps.event.addListener(placeMarker, 'mouseover', function() {
+          placeInfowindow.open(kakaoMap, placeMarker)
+        })
+        
+        // 마우스 아웃시 인포윈도우 닫기
+        window.kakao.maps.event.addListener(placeMarker, 'mouseout', function() {
+          placeInfowindow.close()
+        })
+      })
+      
+      setMapLoaded(true)
+    }
+
+    loadKakaoMap()
+
+    // 클린업 함수
+    return () => {
+      if (scriptRef.current) {
+        document.head.removeChild(scriptRef.current)
+        scriptRef.current = null
+      }
+    }
+  }, [])
 
   return (
     <main className="min-h-screen bg-white">
@@ -494,13 +609,13 @@ export default function PropertyPage({ params }: PropertyPageProps) {
           <h2 className="text-xl font-bold mb-6">근처 교통 및 편의시설</h2>
 
           <div className="h-[300px] bg-gray-100 rounded-lg overflow-hidden mb-4 relative">
-            <Image
-              src="/seoul-station-map.png"
-              alt="Map showing nearby transportation and amenities"
-              fill
-              className="object-cover"
-            />
-            <div className="absolute bottom-2 left-2 text-xs text-gray-500">지도 데이터 ©2025 TMap Mobility</div>
+            {/* 카카오맵으로 대체 */}
+            <div 
+              id="property-map"
+              ref={mapRef}
+              className="w-full h-full"
+            ></div>
+            <div className="absolute bottom-2 left-2 text-xs text-gray-500">지도 데이터 ©2023 카카오</div>
           </div>
 
           <div className="flex items-center gap-2 mb-4">

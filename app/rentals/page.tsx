@@ -14,7 +14,6 @@ import Head from "next/head"
 declare global {
   interface Window {
     kakao: any
-    kakaoMapCallback: (() => void) | null
   }
 }
 
@@ -26,9 +25,9 @@ export default function RentalsPage() {
   const [properties, setProperties] = useState(rentalProperties.slice(0, 10))
   const [zoomLevel, setZoomLevel] = useState(3)
   const [loading, setLoading] = useState(false)
-  const [mapLoaded, setMapLoaded] = useState(false)
   const [map, setMap] = useState<any>(null)
   const mapRef = useRef<HTMLDivElement>(null)
+  const scriptRef = useRef<HTMLScriptElement | null>(null)
 
   const { ref: loadMoreRef, inView } = useInView()
 
@@ -41,81 +40,49 @@ export default function RentalsPage() {
       )
     : properties
 
-  // 카카오맵 스크립트 로드
+  // 카카오맵 스크립트 로드 및 초기화
   useEffect(() => {
-    // 이미 로드된 경우 스킵
-    if (window.kakao && window.kakao.maps) {
-      setMapLoaded(true)
-      return
-    }
-
-    // 카카오맵 콜백 함수 정의
-    window.kakaoMapCallback = () => {
-      console.log("Kakao map script loaded")
-      setMapLoaded(true)
-    }
-
-    // 스크립트 엘리먼트 생성 및 추가
-    const script = document.createElement("script")
-    script.src = `//dapi.kakao.com/v2/maps/sdk.js?appkey=${process.env.NEXT_PUBLIC_KAKAO_MAP_API_KEY}&libraries=services&autoload=false`
-    script.onload = () => {
-      window.kakao.maps.load(window.kakaoMapCallback)
-    }
-    document.head.appendChild(script)
-
-    return () => {
-      // 클린업
-      if (window.kakaoMapCallback) {
-        window.kakaoMapCallback = null
+    const loadKakaoMap = () => {
+      // 이미 스크립트가 있는 경우 중복 로드 방지
+      if (document.getElementById('kakao-map-script')) {
+        initializeMap()
+        return
       }
-    }
-  }, [])
 
-  // 지도 초기화
-  useEffect(() => {
-    if (!mapLoaded || !mapVisible || !mapRef.current || !window.kakao || !window.kakao.maps) {
-      return
+      // 스크립트 생성
+      const script = document.createElement('script')
+      script.id = 'kakao-map-script'
+      script.src = `//dapi.kakao.com/v2/maps/sdk.js?appkey=${process.env.NEXT_PUBLIC_KAKAO_MAP_API_KEY}&libraries=services`
+      script.async = true
+      script.onload = initializeMap
+      
+      // DOM에 추가
+      document.head.appendChild(script)
+      scriptRef.current = script
     }
-    
-    try {
-      // 지도 엘리먼트 크기 확인
-      const mapContainer = mapRef.current
-      console.log("Map container size:", mapContainer.offsetWidth, mapContainer.offsetHeight)
+
+    // 지도 초기화 함수
+    const initializeMap = () => {
+      if (!mapRef.current || !mapVisible) return
       
-      if (mapContainer.offsetWidth === 0 || mapContainer.offsetHeight === 0) {
-        console.warn("Map container has zero size!")
-        // 컨테이너에 명시적 크기 설정
-        mapContainer.style.width = "500px"
-        mapContainer.style.height = "400px"
-      }
-      
+      // 지도 객체 생성
+      const container = mapRef.current
       const options = {
         center: new window.kakao.maps.LatLng(37.5665, 126.9780), // 서울 중심 좌표
         level: zoomLevel
       }
-
-      // 지도 객체 생성
-      const kakaoMap = new window.kakao.maps.Map(mapContainer, options)
-      console.log("Kakao map created successfully")
+      
+      const kakaoMap = new window.kakao.maps.Map(container, options)
       setMap(kakaoMap)
-
-      // 지도 크기 재설정 (화면에 맞게 다시 렌더링)
-      window.kakao.maps.event.addListener(kakaoMap, 'tilesloaded', function() {
-        kakaoMap.relayout()
-      })
-
-      // 주소-좌표 변환 객체 생성
-      const geocoder = new window.kakao.maps.services.Geocoder()
-
-      // 지도 중심 위치 설정 (위치 검색어가 있는 경우)
+      
+      // 지도 중심 위치 설정 (검색어 기반)
       if (location) {
-        // 주소로 좌표 검색
-        geocoder.addressSearch(location, function(result: any, status: any) {
-          // 정상적으로 검색이 완료됐으면
+        // 주소-좌표 변환 객체 생성
+        const geocoder = new window.kakao.maps.services.Geocoder()
+        
+        geocoder.addressSearch(location, (result: any, status: any) => {
           if (status === window.kakao.maps.services.Status.OK) {
             const coords = new window.kakao.maps.LatLng(result[0].y, result[0].x)
-            
-            // 결과값으로 받은 위치를 지도의 중심으로 설정
             kakaoMap.setCenter(coords)
             
             // 마커 표시
@@ -124,7 +91,7 @@ export default function RentalsPage() {
               position: coords
             })
             
-            // 인포윈도우로 장소에 대한 설명 표시
+            // 인포윈도우
             const infowindow = new window.kakao.maps.InfoWindow({
               content: `<div style="width:150px;text-align:center;padding:6px 0;">${location}</div>`
             })
@@ -147,48 +114,59 @@ export default function RentalsPage() {
           }
         })
       }
-
+      
       // 필터링된 속성 기반으로 마커 추가
-      if (filteredProperties.length > 0) {
-        filteredProperties.forEach(property => {
-          // 속성에 따라 위치 지정 (여기서는 임의 위치를 사용하고 있으며, 실제 구현에서는 위도/경도 데이터가 필요함)
-          let position
-          
-          if (property.subtitle.includes("이태원")) {
-            position = new window.kakao.maps.LatLng(37.5340, 126.9940) // 이태원 대략적 위치
-          } else if (property.subtitle.includes("강남")) {
-            position = new window.kakao.maps.LatLng(37.4980, 127.0280) // 강남 대략적 위치
-          } else if (property.subtitle.includes("홍대")) {
-            position = new window.kakao.maps.LatLng(37.5570, 126.9240) // 홍대 대략적 위치
-          } else {
-            // 기본 위치 (서울 중심부에서 약간 랜덤하게)
-            const lat = 37.5665 + (Math.random() - 0.5) * 0.02
-            const lng = 126.9780 + (Math.random() - 0.5) * 0.02
-            position = new window.kakao.maps.LatLng(lat, lng)
-          }
-
-          // 커스텀 오버레이 생성
-          const content = `<div class="bg-black text-white px-2 py-1 rounded-full text-sm shadow-lg whitespace-nowrap">${property.price.toLocaleString()}원</div>`
-          
-          const customOverlay = new window.kakao.maps.CustomOverlay({
-            position: position,
-            content: content,
-            yAnchor: 1
-          })
-          
-          customOverlay.setMap(kakaoMap)
-        })
-      }
-
-      // 지도 컨트롤 추가
-      const zoomControl = new window.kakao.maps.ZoomControl()
-      kakaoMap.addControl(zoomControl, window.kakao.maps.ControlPosition.RIGHT)
-    } catch (error) {
-      console.error("카카오맵 초기화 오류:", error)
+      addPropertyMarkers(kakaoMap)
     }
-  }, [mapLoaded, mapVisible, zoomLevel, location, filteredProperties])
 
-  // Load more properties when scrolling to the bottom
+    // 속성 마커 추가 
+    const addPropertyMarkers = (kakaoMap: any) => {
+      if (!filteredProperties.length) return
+      
+      filteredProperties.forEach(property => {
+        // 속성에 따라 위치 지정
+        let position
+        
+        if (property.subtitle.includes("이태원")) {
+          position = new window.kakao.maps.LatLng(37.5340, 126.9940) // 이태원 대략적 위치
+        } else if (property.subtitle.includes("강남")) {
+          position = new window.kakao.maps.LatLng(37.4980, 127.0280) // 강남 대략적 위치
+        } else if (property.subtitle.includes("홍대")) {
+          position = new window.kakao.maps.LatLng(37.5570, 126.9240) // 홍대 대략적 위치
+        } else {
+          // 기본 위치 (서울 중심부에서 약간 랜덤하게)
+          const lat = 37.5665 + (Math.random() - 0.5) * 0.02
+          const lng = 126.9780 + (Math.random() - 0.5) * 0.02
+          position = new window.kakao.maps.LatLng(lat, lng)
+        }
+
+        // 커스텀 오버레이 생성
+        const content = `<div class="bg-black text-white px-2 py-1 rounded-full text-sm shadow-lg whitespace-nowrap">${property.price.toLocaleString()}원</div>`
+        
+        const customOverlay = new window.kakao.maps.CustomOverlay({
+          position: position,
+          content: content,
+          yAnchor: 1
+        })
+        
+        customOverlay.setMap(kakaoMap)
+      })
+    }
+
+    if (mapVisible) {
+      loadKakaoMap()
+    }
+
+    // 클린업 함수
+    return () => {
+      if (scriptRef.current && !mapVisible) {
+        document.head.removeChild(scriptRef.current)
+        scriptRef.current = null
+      }
+    }
+  }, [mapVisible, location, zoomLevel, filteredProperties])
+
+  // 속성 더 불러오기
   useEffect(() => {
     if (inView && !loading) {
       loadMoreProperties()
@@ -292,7 +270,7 @@ export default function RentalsPage() {
             >
               <div className="relative w-full h-full">
                 <div
-                  id="map"
+                  id="kakao-map"
                   className="absolute inset-0 bg-gray-100 w-full h-full"
                   style={{ width: '100%', height: '100%' }}
                   ref={mapRef}
