@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react"
 import Image from "next/image"
-import { useRouter } from "next/navigation"
+import { useRouter, useParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Calendar } from "@/components/ui/calendar"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose } from "@/components/ui/dialog"
@@ -45,8 +45,9 @@ declare global {
   }
 }
 
-export default function PropertyPage({ params }: PropertyPageProps) {
+export default function PropertyPage() {
   const router = useRouter()
+  const params = useParams()
   const [selectedStartDate, setSelectedStartDate] = useState<Date | undefined>(new Date())
   const [selectedEndDate, setSelectedEndDate] = useState<Date | undefined>(
     new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
@@ -81,10 +82,11 @@ export default function PropertyPage({ params }: PropertyPageProps) {
 
   // 컴포넌트가 마운트될 때 params.id 사용
   useEffect(() => {
-    if (params.id) {
-      setPropertyId(Number.parseInt(params.id))
+    const id = params?.id;
+    if (id) {
+      setPropertyId(parseInt(id as string));
     }
-  }, [params.id])
+  }, [params]);
 
   // In a real app, you would fetch the property data based on the ID
   const property = {
@@ -229,104 +231,125 @@ export default function PropertyPage({ params }: PropertyPageProps) {
     const loadKakaoMap = () => {
       // 이미 스크립트가 있는 경우 중복 로드 방지
       if (document.getElementById('kakao-map-script')) {
-        initializeMap()
-        return
+        // 스크립트가 이미 존재하더라도 kakao 객체가 완전히 로드되었는지 확인
+        if (window.kakao && window.kakao.maps) {
+          initializeMap();
+        } else {
+          // kakao 객체가 로드될 때까지 기다림
+          const checkKakaoInterval = setInterval(() => {
+            if (window.kakao && window.kakao.maps) {
+              clearInterval(checkKakaoInterval);
+              initializeMap();
+            }
+          }, 100);
+        }
+        return;
       }
 
       // 스크립트 생성
-      const script = document.createElement('script')
-      script.id = 'kakao-map-script'
-      script.src = `//dapi.kakao.com/v2/maps/sdk.js?appkey=${process.env.NEXT_PUBLIC_KAKAO_MAP_API_KEY}&libraries=services`
-      script.async = true
-      script.onload = initializeMap
+      const script = document.createElement('script');
+      script.id = 'kakao-map-script';
+      script.src = `//dapi.kakao.com/v2/maps/sdk.js?appkey=${process.env.NEXT_PUBLIC_KAKAO_MAP_API_KEY}&libraries=services&autoload=false`;
+      script.async = true;
+      
+      script.onload = () => {
+        // 스크립트 로드 후 kakao.maps 초기화
+        window.kakao.maps.load(() => {
+          initializeMap();
+        });
+      };
       
       // DOM에 추가
-      document.head.appendChild(script)
-      scriptRef.current = script
-    }
+      document.head.appendChild(script);
+      scriptRef.current = script;
+    };
 
-    // 지도 초기화 함수
+    // 지도 초기화 함수 (kakao.maps가 로드된 후 호출됨)
     const initializeMap = () => {
-      if (!mapRef.current) return
+      if (!mapRef.current || !window.kakao || !window.kakao.maps) return;
       
-      // 서울역 좌표 (중심점)
-      const seoulStationPosition = new window.kakao.maps.LatLng(37.5546, 126.9706)
-      
-      // 지도 객체 생성
-      const mapOptions = {
-        center: seoulStationPosition,
-        level: 3
-      }
-      
-      const kakaoMap = new window.kakao.maps.Map(mapRef.current, mapOptions)
-      
-      // 서울역 마커 추가
-      const marker = new window.kakao.maps.Marker({
-        position: seoulStationPosition,
-        map: kakaoMap
-      })
-      
-      // 인포윈도우 생성
-      const infowindow = new window.kakao.maps.InfoWindow({
-        content: '<div style="padding:5px;font-size:12px;text-align:center;">서울역</div>'
-      })
-      infowindow.open(kakaoMap, marker)
-      
-      // 주변 교통 및 편의 시설 마커 추가
-      const placeMarkers = [
-        {
-          position: new window.kakao.maps.LatLng(37.5555, 126.9721),
-          title: '편의점',
-          content: '편의점 (도보 5분)'
-        },
-        {
-          position: new window.kakao.maps.LatLng(37.5536, 126.9690),
-          title: '카페',
-          content: '카페 (도보 3분)'
-        },
-        {
-          position: new window.kakao.maps.LatLng(37.5562, 126.9718),
-          title: '식당',
-          content: '식당 (도보 5분)'
+      try {
+        // 서울역 좌표 (중심점)
+        const seoulStationPosition = new window.kakao.maps.LatLng(37.5546, 126.9706);
+        
+        // 지도 객체 생성
+        const mapOptions = {
+          center: seoulStationPosition,
+          level: 3
         }
-      ]
-      
-      placeMarkers.forEach(place => {
-        // 주변 시설 마커
-        const placeMarker = new window.kakao.maps.Marker({
-          position: place.position,
+        
+        const kakaoMap = new window.kakao.maps.Map(mapRef.current, mapOptions)
+        
+        // 서울역 마커 추가
+        const marker = new window.kakao.maps.Marker({
+          position: seoulStationPosition,
           map: kakaoMap
         })
         
-        // 마커에 마우스오버 이벤트 등록
-        const placeInfowindow = new window.kakao.maps.InfoWindow({
-          content: `<div style="padding:5px;font-size:12px;text-align:center;">${place.content}</div>`
+        // 인포윈도우 생성
+        const infowindow = new window.kakao.maps.InfoWindow({
+          content: '<div style="padding:5px;font-size:12px;text-align:center;">서울역</div>'
+        })
+        infowindow.open(kakaoMap, marker)
+        
+        // 주변 교통 및 편의 시설 마커 추가
+        const placeMarkers = [
+          {
+            position: new window.kakao.maps.LatLng(37.5555, 126.9721),
+            title: '편의점',
+            content: '편의점 (도보 5분)'
+          },
+          {
+            position: new window.kakao.maps.LatLng(37.5536, 126.9690),
+            title: '카페',
+            content: '카페 (도보 3분)'
+          },
+          {
+            position: new window.kakao.maps.LatLng(37.5562, 126.9718),
+            title: '식당',
+            content: '식당 (도보 5분)'
+          }
+        ]
+        
+        placeMarkers.forEach(place => {
+          // 주변 시설 마커
+          const placeMarker = new window.kakao.maps.Marker({
+            position: place.position,
+            map: kakaoMap
+          })
+          
+          // 마커에 마우스오버 이벤트 등록
+          const placeInfowindow = new window.kakao.maps.InfoWindow({
+            content: `<div style="padding:5px;font-size:12px;text-align:center;">${place.content}</div>`
+          })
+          
+          // 마우스 오버시 인포윈도우 표시
+          window.kakao.maps.event.addListener(placeMarker, 'mouseover', function() {
+            placeInfowindow.open(kakaoMap, placeMarker)
+          })
+          
+          // 마우스 아웃시 인포윈도우 닫기
+          window.kakao.maps.event.addListener(placeMarker, 'mouseout', function() {
+            placeInfowindow.close()
+          })
         })
         
-        // 마우스 오버시 인포윈도우 표시
-        window.kakao.maps.event.addListener(placeMarker, 'mouseover', function() {
-          placeInfowindow.open(kakaoMap, placeMarker)
-        })
-        
-        // 마우스 아웃시 인포윈도우 닫기
-        window.kakao.maps.event.addListener(placeMarker, 'mouseout', function() {
-          placeInfowindow.close()
-        })
-      })
-      
-      setMapLoaded(true)
-    }
+        setMapLoaded(true)
+      } catch (error) {
+        console.error('카카오맵 초기화 오류:', error);
+      }
+    };
 
-    loadKakaoMap()
+    loadKakaoMap();
 
     // 클린업 함수
     return () => {
       if (scriptRef.current) {
-        document.head.removeChild(scriptRef.current)
-        scriptRef.current = null
+        document.head.removeChild(scriptRef.current);
+        scriptRef.current = null;
       }
-    }
-  }, [])
+    };
+  }, []);
 
   return (
     <main className="min-h-screen bg-white">
